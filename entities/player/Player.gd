@@ -119,3 +119,6 @@ func is_jumping() -> bool:
 
 func is_jump_interrupted() -> bool: #Return true if user has just released the jump key
 	return Input.is_action_just_released("jump") and _velocity.y < 0.0
+	
+func is_sprinting() -> bool: #Return true if the player is sprinting on ground
+	return Input.is_action_pressed("sprint_toggle") and not is_on_floor()
