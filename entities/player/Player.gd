@@ -30,15 +30,14 @@ func calculate_move_velocity( #Calculate the velocity the player will move at
 	var out: = linear_velocity
 	
 	#If actor cannot act and is immobile, keep them moving in the same direction but slowed down
-	if not can_act:
-		out.x = out.x*0.6
+	if not can_move:
+		out.x = out.x*0.9
 		return out
-	
 	
 	#walking left/right
 	out.x = speed.x * direction.x
 	#sprinting
-	if Input.is_action_pressed("sprint_toggle") and direction.x != 0 and moving_forward(): 
+	if Input.is_action_pressed("sprint_toggle") and direction.x != 0: 
 		out.x = speed.x * direction.x * 1.5
 	#falling
 	out.y += gravity*get_physics_process_delta_time()
@@ -64,22 +63,13 @@ func animate(): #Animate player based on input and velocity
 	var xdir: = get_direction().x
 	var ydir: = get_velocity().y
 	var player = $AnimationPlayer
-#Adjust horizontal flipping based on whether facing left or right
-	if get_mouse_to_player_offset() >= 0:
+#Adjust horizontal flipping based on whether facing left or right (if sprinting, instead base it on direction)
+	if (not is_sprinting() and get_mouse_to_player_offset() >= 0) or (is_sprinting() and xdir >= 0):
 		$Sprite.flip_h = false
 	else:
 		$Sprite.flip_h = true
-		if $AnimationPlayer.is_playing() and player.current_animation != "stand": #To avoid glitch when rapidly changing between back and forward
-			#currently playing animation object
-			var animation = player.get_animation(player.current_animation)
-			#Track within the currently playing animation that contains the x position
-			var pos_track_index = animation.find_track("Sprite:position")
-			#position key at this time in the original animation
-			var key_in_animation = animation.track_find_key(pos_track_index,floor(20*player.current_animation_position)/20)
-			#position value at this time in the original animation
-			var value_in_animation = animation.track_get_key_value(pos_track_index, key_in_animation)
-			#Modify x values for clean animation
-			$Sprite.position.x = value_in_animation.x*-1
+		if player.is_playing() and player.current_animation != "stand": #To avoid glitch when rapidly changing between back and forward
+			stabilize_x_direction(player)
 	#Check if walking backwards using multiplication of unary signs properties
 	if not moving_forward() and player.current_animation == "walk":
 		player.playback_speed = -1
@@ -91,7 +81,7 @@ func animate(): #Animate player based on input and velocity
 			player.current_animation = "stand"
 		elif Input.is_action_pressed("move_down") and moving_forward():
 			player.current_animation = "slide"
-		elif Input.is_action_pressed("sprint_toggle") and moving_forward():
+		elif Input.is_action_pressed("sprint_toggle"):
 			player.current_animation = "run"
 		else:
 			player.current_animation = "walk"
@@ -113,12 +103,23 @@ func facing_right() -> bool: #Return true if facing to the right, false if facin
 func get_velocity() -> Vector2: #Return workable velocity
 	return Vector2(_velocity.x, _velocity.y - 50/3)
 
-func is_jumping() -> bool: 
-#Return true if player is in the process of jumping
+func is_jumping() -> bool: #Return true if player is in the process of jumping
 	return (Input.is_action_pressed("jump") or Input.is_action_just_released("jump"))
 
 func is_jump_interrupted() -> bool: #Return true if user has just released the jump key
 	return Input.is_action_just_released("jump") and _velocity.y < 0.0
 	
 func is_sprinting() -> bool: #Return true if the player is sprinting on ground
-	return Input.is_action_pressed("sprint_toggle") and not is_on_floor()
+	return Input.is_action_pressed("sprint_toggle") and is_on_floor()
+	
+func stabilize_x_direction(player: AnimationPlayer): #When facing left, multiply each x value by -1 to account for x offset value (required every frame)
+	#currently playing animation object
+	var animation = player.get_animation(player.current_animation)
+	#Track within the currently playing animation that contains the x position
+	var pos_track_index = animation.find_track("Sprite:position")
+	#position key at this time in the original animation
+	var key_in_animation = animation.track_find_key(pos_track_index,floor(20*player.current_animation_position)/20)
+	#position value at this time in the original animation
+	var value_in_animation = animation.track_get_key_value(pos_track_index, key_in_animation)
+	#Modify x values for clean animation
+	$Sprite.position.x = value_in_animation.x*-1
