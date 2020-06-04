@@ -1,125 +1,125 @@
-extends Actor
+extends KinematicBody2D
+
+const FLOOR_NORMAL = Vector2.UP
+
+#Gravity's effect on the player
+var gravity: = 1000.0
+#In-game velocity
+var velocity: = Vector2.ZERO
+#List of all velocities to compute into total velocity
+var velocities = []
+#Whether or not the actor can do anything
+var allow_player_input = true
+#Handle user-input velocity
+var move_velocity = Vector2.ZERO
+#Handle skill-related velocity
+var skill_velocity = Vector2.ZERO
+#Handle outside-input velocity
+var outside_velocity = Vector2.ZERO
+#All general data for the player
+var data = {
+	"speed": Vector2(750.0, 1100.0),
+	"gravity": 1000.0,
+}
+
 
 func _physics_process(delta):
 	#Handle movement
 	var direction: = get_direction()
-	_velocity = calculate_move_velocity(_velocity, speed, direction)
-	var snap = Vector2(0,40) if not is_jumping() else Vector2.ZERO
-	_velocity = move_and_slide_with_snap(_velocity, snap,  FLOOR_NORMAL, false, 4, PI/4, false)
-	
+	var total_velocity = Vector2.ZERO
+	#Determine the velocity controlled by the player, depending on whether or not they can move
+	if allow_player_input:
+		add_velocity(calculate_move_velocity(), "input", "remove", 0)
+	for vel_array in velocities:
+		total_velocity += vel_array[0]
+	#Add together player-controlled and outside velocity to determine final velocity
+	velocity = move_and_slide_with_snap(total_velocity, get_snap(),  FLOOR_NORMAL, false, 4, PI/4, false)
+	#Apply gravity
+	velocity.y += gravity*delta
+	#Modify all velocities
+	modify_velocities()
 
 func _process(delta):
-	animate()
+	$AnimationPlayer.animate()
+	
 	#Uncomment if need to check fps
 	#print(Engine.get_frames_per_second())
+
+func calculate_move_velocity() -> Vector2: #Calculate the velocity the player will move at
+	var out: = velocity
+	var direction = get_direction()
+	var speed = data.get("speed")
+	
+	#sprinting
+	out.x = speed.x * direction.x
+	#walking
+	if $SkillManager.input_buffered("walk_toggle") and direction.x != 0: 
+		out.x = speed.x * direction.x * 2/3.0
+	#falling
+	out.y += gravity*get_physics_process_delta_time()
+	#fast fall
+	if $SkillManager.input_buffered("move_down") and not is_on_floor() and not has_node("skill_jump"): 
+		out.y += gravity*get_physics_process_delta_time()*2.5
+	return out
 
 func get_direction() -> Vector2: #Output horizontal and vertical vector based on input
 	var out: = Vector2.ZERO
 	out.x = Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
-	if Input.is_action_just_pressed("jump") and is_on_floor():
+	if $SkillManager.input_buffered("jump") and is_on_floor():
 		out.y = -1.0
 	else:
 		out.y = 1.0
 	return out
-	
-func calculate_move_velocity( #Calculate the velocity the player will move at
-		linear_velocity: Vector2,
-		speed: Vector2,
-		direction: Vector2
-	) -> Vector2:
-	var out: = linear_velocity
-	
-	#If actor cannot act and is immobile, keep them moving in the same direction but slowed down
-	if not can_move:
-		out.x = out.x*0.9
-		return out
-	
-	#walking left/right
-	out.x = speed.x * direction.x
-	#sprinting
-	if Input.is_action_pressed("sprint_toggle") and direction.x != 0: 
-		out.x = speed.x * direction.x * 1.5
-	#falling
-	out.y += gravity*get_physics_process_delta_time()
-	#jumping
-	if direction.y == -1.0: 
-		out.y = speed.y * direction.y
-	#interrupt jump
-	elif is_jump_interrupted(): 
-		out.y *= 0.25
-	#fast fall
-	elif Input.is_action_pressed("move_down") and not is_on_floor(): 
-		out.y = speed.y * direction.y
-	#slide
-	elif Input.is_action_pressed("move_down") and is_on_floor() and direction.x != 0 and moving_forward(): 
-		if Input.is_action_just_pressed("move_down") or Input.is_action_just_pressed("move_left") or Input.is_action_just_pressed("move_right"):
-			out.x = 1.75*direction.x*speed.x
-		else:
-			out.x = linear_velocity.x*0.97
-	return out
-	
 
-func animate(): #Animate player based on input and velocity
-	var xdir: = get_direction().x
-	var ydir: = get_velocity().y
-	var player = $AnimationPlayer
-#Adjust horizontal flipping based on whether facing left or right (if sprinting, instead base it on direction)
-	if (not is_sprinting() and get_mouse_to_player_offset() >= 0) or (is_sprinting() and xdir >= 0):
-		$Sprite.flip_h = false
-	else:
-		$Sprite.flip_h = true
-		if player.is_playing() and player.current_animation != "stand": #To avoid glitch when rapidly changing between back and forward
-			stabilize_x_direction(player)
-	#Check if walking backwards using multiplication of unary signs properties
-	if not moving_forward() and player.current_animation == "walk":
-		player.playback_speed = -1
-	else:
-		player.playback_speed = 1
-#Animate sprite
-	if is_on_floor():
-		if xdir == 0:
-			player.current_animation = "stand"
-		elif Input.is_action_pressed("move_down") and moving_forward():
-			player.current_animation = "slide"
-		elif Input.is_action_pressed("sprint_toggle"):
-			player.current_animation = "run"
-		else:
-			player.current_animation = "walk"
-	elif ydir < 0:
-		player.current_animation = "jump"
-	elif ydir > 0:
-		player.current_animation = "fall"
-		
-
-func get_mouse_to_player_offset() -> float: #Return distance between x values of mouse and player
-	return get_viewport().get_mouse_position().x - get_global_transform_with_canvas().origin.x
-
-func moving_forward() -> bool: #Return true if moving same direction as mouse
-	return get_direction().x * get_mouse_to_player_offset() > 0
+func get_snap() -> Vector2: #Generate/Return snap vector for move and slide with snap
+	var snap = Vector2(0,40) if not (is_jumping()) else Vector2.ZERO
+	return snap
 
 func facing_right() -> bool: #Return true if facing to the right, false if facing left
 	return $Sprite.flip_h == false
 
 func get_velocity() -> Vector2: #Return workable velocity
-	return Vector2(_velocity.x, _velocity.y - 50/3)
+	return Vector2(velocity.x, velocity.y)
+
+func set_velocity(velocity_in: Vector2): #Take a wild guess
+	velocity = velocity_in
 
 func is_jumping() -> bool: #Return true if player is in the process of jumping
-	return (Input.is_action_pressed("jump") or Input.is_action_just_released("jump"))
+	return $SkillManager.input_buffered("jump")
 
 func is_jump_interrupted() -> bool: #Return true if user has just released the jump key
-	return Input.is_action_just_released("jump") and _velocity.y < 0.0
-	
-func is_sprinting() -> bool: #Return true if the player is sprinting on ground
-	return Input.is_action_pressed("sprint_toggle") and is_on_floor()
-	
-func stabilize_x_direction(player: AnimationPlayer): #When facing left, multiply each x value by -1 to account for x offset value (required every frame)
-	#currently playing animation object
-	var animation = player.get_animation(player.current_animation)
-	#Track within the currently playing animation that contains the x position
-	var pos_track_index = animation.find_track("Sprite:position")
-	#position key at this time in the original animation
-	var key_in_animation = animation.track_find_key(pos_track_index,floor(20*player.current_animation_position)/20)
-	#position value at this time in the original animation
-	var value_in_animation = animation.track_get_key_value(pos_track_index, key_in_animation)
-	#Modify x values for clean animation
-	$Sprite.position.x = value_in_animation.x*-1
+	return Input.is_action_just_released("jump") and velocity.y < 0.0
+
+func allow_player_input(input: bool):
+	allow_player_input = input
+
+func set_move_velocity(input: Vector2):
+	move_velocity = input
+
+func set_skill_velocity(input: Vector2):
+	skill_velocity = input
+
+func get_data() -> Dictionary:
+	return data
+
+#Adds a velocity to the list of velocities.
+func add_velocity(input_velocity: Vector2, name: String, type: String, factor: float):
+	#input_velocity is the velocity to add.
+	#name is the name of the velocity
+	#type is the type of velocity:
+	#	remove will be removed after one frame
+	#	scale will scale up or down depending on the factor value
+	velocities.append([input_velocity, name, type, factor])
+
+#Iterates through all velocities and modifies them as required by their type.
+func modify_velocities():
+	for i in range(velocities.size() - 1, -1, -1):
+		if velocities[i][2] == "remove" or velocities[i][0].length() < 0.00001:
+			velocities.remove(i)
+		elif velocities[i][2] == "scale":
+			velocities[i][0] *= velocities[i][3]
+
+func remove_velocity(name: String):
+	for i in range(velocities.size() - 1, -1, -1):
+		if velocities[i][1] == name:
+			velocities.remove(i)
